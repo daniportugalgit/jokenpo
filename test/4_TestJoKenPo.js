@@ -29,9 +29,8 @@ I) DRAW if p1Choice == SCISSORS && p2Choice == SCISSORS
 
 HAPPY PATHS (second part):
 4) It should cancel a game
-5) It should claim an unplayed game
-6) It should claim an unrevealed game
-7) It should withdraw
+5) It should claim an unrevealed game
+6) It should withdraw
 
 EXCEPTIONS:
 1.1) It should fail to create game if the game ID already exists
@@ -54,17 +53,13 @@ EXCEPTIONS:
 
 4.1) It should fail to cancel game if msg.sender != player1
 4.2) It should fail to cancel game if player2 has already played
+4.3) It should fail to cancel game if game has already ended
 
-5.1) It should fail to claim an unplayed game if msg.sender != player1
-5.2) It should fail to claim an unplayed game if player2 has already played
-5.3) It should fail to claim an unplayed game if game has already ended
-5.4) It should fail to claim an unplayed game if game has not expired yet
+5.1) It should fail to claim an unrevealed game if msg.sender != player2
+5.2) It should fail to claim an unrevealed game if game has already ended
+5.3) It should fail to claim an unrevealed game if game has not expired yet
 
-6.1) It should fail to claim an unrevealed game if msg.sender != player2
-6.2) It should fail to claim an unrevealed game if game has already ended
-6.3) It should fail to claim an unrevealed game if game has not expired yet
-
-7.1) It should fail to withdraw if balance <= 0
+6.1) It should fail to withdraw if balance <= 0
 */
 
 contract("JoKenPo", accounts => {
@@ -78,53 +73,49 @@ contract("JoKenPo", accounts => {
 	
 	it("1) should create a game", async () => {
 		let hashedChoice = await _instance.getHashedChoice.call(defaultP1Choice, account2, defaultPassword, {from: account1});
-		let gameAddress = await _instance.createNewGame.call(account2, hashedChoice, deadline, {from: account1});
+		
 		await _instance.createNewGame(account2, hashedChoice, deadline, {from: account1, value:100});
-		let gameObject = await _instance.games.call(gameAddress, {from: account1});
+		let gameObject = await _instance.games.call(hashedChoice, {from: account1});
 		let validUntilBlock = await web3.eth.getBlockNumber();
 		validUntilBlock += deadline;
 
 		assert.strictEqual(gameObject.player1, account1, "Game has not registered its creator.");
 		assert.strictEqual(gameObject.player2, account2, "Game has not registered player2.");
 		assert.strictEqual(gameObject.betValue.toString(10), "100", "Game has registered wrong betValue.");
-		assert.strictEqual(gameObject.p1HashedChoice, hashedChoice, "Game has not registered p1HashedChoice.");
 		assert.strictEqual(gameObject.p2Choice.toString(10), "0", "Game should not have a p2Choice right now.");
 		assert.strictEqual(gameObject.validUntilBlock.toString(10), validUntilBlock.toString(10), "Game has not registered the correct deadline.");
-		assert.strictEqual(gameObject.isResolved, false, "Game should not be resolved right now.");
 	});
 
 	it("2) should bet in existing game", async () => {
 		let hashedChoice = await _instance.getHashedChoice.call(defaultP1Choice, account2, defaultPassword, {from: account1});
-		let gameAddress = await _instance.createNewGame.call(account2, hashedChoice, deadline, {from: account1});
-		await _instance.createNewGame(account2, hashedChoice, deadline, {from: account1, value:100});
-		await _instance.betInExistingGame(gameAddress, defaultP2Choice, {from: account2, value:100});
 		
-		let gameObject = await _instance.games.call(gameAddress, {from: account1});
+		await _instance.createNewGame(account2, hashedChoice, deadline, {from: account1, value:100});
+		await _instance.betInExistingGame(hashedChoice, defaultP2Choice, {from: account2, value:100});
+		
+		let gameObject = await _instance.games.call(hashedChoice, {from: account1});
 		let validUntilBlock = await web3.eth.getBlockNumber();
 		validUntilBlock += gracePeriod;
 		
 		assert.strictEqual(gameObject.player1, account1, "Game has changed its creator.");
 		assert.strictEqual(gameObject.player2, account2, "Game changed player2.");
 		assert.strictEqual(gameObject.betValue.toString(10), "100", "Game has changed betValue.");
-		assert.strictEqual(gameObject.p1HashedChoice, hashedChoice, "Game has changed p1HashedChoice.");
 		assert.strictEqual(gameObject.p2Choice.toString(10), defaultP2Choice.toString(10), "Game has not registered p2Choice.");
 		assert.strictEqual(gameObject.validUntilBlock.toString(10), validUntilBlock.toString(10), "Game has not registered the correct extended deadline.");
-		assert.strictEqual(gameObject.isResolved, false, "Game should not be resolved right now.");
 	});
 
 	it("3) should reveal choice and winner", async () => {
 		let hashedChoice = await _instance.getHashedChoice.call(defaultP1Choice, account2, defaultPassword, {from: account1});
-		let gameAddress = await _instance.createNewGame.call(account2, hashedChoice, deadline, {from: account1});
+		
 		await _instance.createNewGame(account2, hashedChoice, deadline, {from: account1, value:100});
-		await _instance.betInExistingGame(gameAddress, defaultP2Choice, {from: account2, value:100});
-		let result = await _instance.revealChoice(gameAddress, defaultP1Choice, defaultPassword, {from: account1});
+		await _instance.betInExistingGame(hashedChoice, defaultP2Choice, {from: account2, value:100});
+		let result = await _instance.revealChoice(hashedChoice, defaultP1Choice, defaultPassword, {from: account1});
 		
 		await truffleAssert.eventEmitted(result, 'LogGameResolved', (ev) => {
 			return ev.winner == account1;
 		});
 
-		let gameObject = await _instance.games.call(gameAddress, {from: account1});
-		assert.strictEqual(gameObject.isResolved, true, "Game should be resolved.");
+		let gameObject = await _instance.games.call(hashedChoice, {from: account1});
+		assert.strictEqual(gameObject.validUntilBlock.toString(10), "0", "Game should be resolved.");
 
 		let balance1 = await _instance.balances.call(account1);
 		assert.strictEqual(balance1.toString(10), "200", "Wrong balance found.");
@@ -136,10 +127,10 @@ contract("JoKenPo", accounts => {
 		let p2Choice = 1; //ROCK
 
 		let hashedChoice = await _instance.getHashedChoice.call(p1Choice, account2, defaultPassword, {from: account1});
-		let gameAddress = await _instance.createNewGame.call(account2, hashedChoice, deadline, {from: account1});
+		
 		await _instance.createNewGame(account2, hashedChoice, deadline, {from: account1, value:100});
-		await _instance.betInExistingGame(gameAddress, p2Choice, {from: account2, value:100});
-		let result = await _instance.revealChoice(gameAddress, p1Choice, defaultPassword, {from: account1});
+		await _instance.betInExistingGame(hashedChoice, p2Choice, {from: account2, value:100});
+		let result = await _instance.revealChoice(hashedChoice, p1Choice, defaultPassword, {from: account1});
 		
 		await truffleAssert.eventEmitted(result, 'LogGameResolved', (ev) => {
 			return ev.winner == expectedWinner;
@@ -152,10 +143,10 @@ contract("JoKenPo", accounts => {
 		let p2Choice = 2; //PAPER
 
 		let hashedChoice = await _instance.getHashedChoice.call(p1Choice, account2, defaultPassword, {from: account1});
-		let gameAddress = await _instance.createNewGame.call(account2, hashedChoice, deadline, {from: account1});
+		
 		await _instance.createNewGame(account2, hashedChoice, deadline, {from: account1, value:100});
-		await _instance.betInExistingGame(gameAddress, p2Choice, {from: account2, value:100});
-		let result = await _instance.revealChoice(gameAddress, p1Choice, defaultPassword, {from: account1});
+		await _instance.betInExistingGame(hashedChoice, p2Choice, {from: account2, value:100});
+		let result = await _instance.revealChoice(hashedChoice, p1Choice, defaultPassword, {from: account1});
 		
 		await truffleAssert.eventEmitted(result, 'LogGameResolved', (ev) => {
 			return ev.winner == expectedWinner;
@@ -168,10 +159,10 @@ contract("JoKenPo", accounts => {
 		let p2Choice = 3; //SCISSORS
 
 		let hashedChoice = await _instance.getHashedChoice.call(p1Choice, account2, defaultPassword, {from: account1});
-		let gameAddress = await _instance.createNewGame.call(account2, hashedChoice, deadline, {from: account1});
+		
 		await _instance.createNewGame(account2, hashedChoice, deadline, {from: account1, value:100});
-		await _instance.betInExistingGame(gameAddress, p2Choice, {from: account2, value:100});
-		let result = await _instance.revealChoice(gameAddress, p1Choice, defaultPassword, {from: account1});
+		await _instance.betInExistingGame(hashedChoice, p2Choice, {from: account2, value:100});
+		let result = await _instance.revealChoice(hashedChoice, p1Choice, defaultPassword, {from: account1});
 		
 		await truffleAssert.eventEmitted(result, 'LogGameResolved', (ev) => {
 			return ev.winner == expectedWinner;
@@ -184,10 +175,10 @@ contract("JoKenPo", accounts => {
 		let p2Choice = 2; //PAPER
 
 		let hashedChoice = await _instance.getHashedChoice.call(p1Choice, account2, defaultPassword, {from: account1});
-		let gameAddress = await _instance.createNewGame.call(account2, hashedChoice, deadline, {from: account1});
+		
 		await _instance.createNewGame(account2, hashedChoice, deadline, {from: account1, value:100});
-		await _instance.betInExistingGame(gameAddress, p2Choice, {from: account2, value:100});
-		let result = await _instance.revealChoice(gameAddress, p1Choice, defaultPassword, {from: account1});
+		await _instance.betInExistingGame(hashedChoice, p2Choice, {from: account2, value:100});
+		let result = await _instance.revealChoice(hashedChoice, p1Choice, defaultPassword, {from: account1});
 		
 		await truffleAssert.eventEmitted(result, 'LogGameResolved', (ev) => {
 			return ev.winner == expectedWinner;
@@ -200,10 +191,10 @@ contract("JoKenPo", accounts => {
 		let p2Choice = 3; //SCISSORS
 
 		let hashedChoice = await _instance.getHashedChoice.call(p1Choice, account2, defaultPassword, {from: account1});
-		let gameAddress = await _instance.createNewGame.call(account2, hashedChoice, deadline, {from: account1});
+		
 		await _instance.createNewGame(account2, hashedChoice, deadline, {from: account1, value:100});
-		await _instance.betInExistingGame(gameAddress, p2Choice, {from: account2, value:100});
-		let result = await _instance.revealChoice(gameAddress, p1Choice, defaultPassword, {from: account1});
+		await _instance.betInExistingGame(hashedChoice, p2Choice, {from: account2, value:100});
+		let result = await _instance.revealChoice(hashedChoice, p1Choice, defaultPassword, {from: account1});
 		
 		await truffleAssert.eventEmitted(result, 'LogGameResolved', (ev) => {
 			return ev.winner == expectedWinner;
@@ -216,10 +207,10 @@ contract("JoKenPo", accounts => {
 		let p2Choice = 1; //ROCK
 
 		let hashedChoice = await _instance.getHashedChoice.call(p1Choice, account2, defaultPassword, {from: account1});
-		let gameAddress = await _instance.createNewGame.call(account2, hashedChoice, deadline, {from: account1});
+		
 		await _instance.createNewGame(account2, hashedChoice, deadline, {from: account1, value:100});
-		await _instance.betInExistingGame(gameAddress, p2Choice, {from: account2, value:100});
-		let result = await _instance.revealChoice(gameAddress, p1Choice, defaultPassword, {from: account1});
+		await _instance.betInExistingGame(hashedChoice, p2Choice, {from: account2, value:100});
+		let result = await _instance.revealChoice(hashedChoice, p1Choice, defaultPassword, {from: account1});
 		
 		await truffleAssert.eventEmitted(result, 'LogGameResolved', (ev) => {
 			return ev.winner == expectedWinner;
@@ -232,10 +223,10 @@ contract("JoKenPo", accounts => {
 		let p2Choice = 1; //ROCK
 
 		let hashedChoice = await _instance.getHashedChoice.call(p1Choice, account2, defaultPassword, {from: account1});
-		let gameAddress = await _instance.createNewGame.call(account2, hashedChoice, deadline, {from: account1});
+		
 		await _instance.createNewGame(account2, hashedChoice, deadline, {from: account1, value:100});
-		await _instance.betInExistingGame(gameAddress, p2Choice, {from: account2, value:100});
-		let result = await _instance.revealChoice(gameAddress, p1Choice, defaultPassword, {from: account1});
+		await _instance.betInExistingGame(hashedChoice, p2Choice, {from: account2, value:100});
+		let result = await _instance.revealChoice(hashedChoice, p1Choice, defaultPassword, {from: account1});
 		
 		await truffleAssert.eventEmitted(result, 'LogGameResolved', (ev) => {
 			return ev.winner == expectedWinner;
@@ -248,10 +239,10 @@ contract("JoKenPo", accounts => {
 		let p2Choice = 2; //PAPER
 
 		let hashedChoice = await _instance.getHashedChoice.call(p1Choice, account2, defaultPassword, {from: account1});
-		let gameAddress = await _instance.createNewGame.call(account2, hashedChoice, deadline, {from: account1});
+		
 		await _instance.createNewGame(account2, hashedChoice, deadline, {from: account1, value:100});
-		await _instance.betInExistingGame(gameAddress, p2Choice, {from: account2, value:100});
-		let result = await _instance.revealChoice(gameAddress, p1Choice, defaultPassword, {from: account1});
+		await _instance.betInExistingGame(hashedChoice, p2Choice, {from: account2, value:100});
+		let result = await _instance.revealChoice(hashedChoice, p1Choice, defaultPassword, {from: account1});
 		
 		await truffleAssert.eventEmitted(result, 'LogGameResolved', (ev) => {
 			return ev.winner == expectedWinner;
@@ -264,10 +255,10 @@ contract("JoKenPo", accounts => {
 		let p2Choice = 3; //SCISSORS
 
 		let hashedChoice = await _instance.getHashedChoice.call(p1Choice, account2, defaultPassword, {from: account1});
-		let gameAddress = await _instance.createNewGame.call(account2, hashedChoice, deadline, {from: account1});
+		
 		await _instance.createNewGame(account2, hashedChoice, deadline, {from: account1, value:100});
-		await _instance.betInExistingGame(gameAddress, p2Choice, {from: account2, value:100});
-		let result = await _instance.revealChoice(gameAddress, p1Choice, defaultPassword, {from: account1});
+		await _instance.betInExistingGame(hashedChoice, p2Choice, {from: account2, value:100});
+		let result = await _instance.revealChoice(hashedChoice, p1Choice, defaultPassword, {from: account1});
 		
 		await truffleAssert.eventEmitted(result, 'LogGameResolved', (ev) => {
 			return ev.winner == expectedWinner;
@@ -276,64 +267,52 @@ contract("JoKenPo", accounts => {
 
 	it("4) should cancel a game", async () => {
 		let hashedChoice = await _instance.getHashedChoice.call(defaultP1Choice, account2, defaultPassword, {from: account1});
-		let gameAddress = await _instance.createNewGame.call(account2, hashedChoice, deadline, {from: account1});
-		await _instance.createNewGame(account2, hashedChoice, deadline, {from: account1, value:100});
-		await _instance.cancelGame(gameAddress, {from: account1});
-		let gameObject = await _instance.games.call(gameAddress, {from: account1});
 		
-		assert.strictEqual(gameObject.isResolved, true, "Game should be resolved right now.");
+		await _instance.createNewGame(account2, hashedChoice, deadline, {from: account1, value:100});
+		await _instance.cancelGame(hashedChoice, {from: account1});
+		let gameObject = await _instance.games.call(hashedChoice, {from: account1});
+		
+		assert.strictEqual(gameObject.validUntilBlock.toString(10), "0", "Game should be resolved right now.");
 
 		let balance1 = await _instance.balances.call(account1);
 		assert.strictEqual(balance1.toString(10), "100", "Wrong balance found.");
 	});
 
-	it("5) should claim an unplayed game", async () => {
+	it("5) should claim an unrevealed game", async () => {
 		let hashedChoice = await _instance.getHashedChoice.call(defaultP1Choice, account2, defaultPassword, {from: account1});
-		let gameAddress = await _instance.createNewGame.call(account2, hashedChoice, deadline, {from: account1});
-		await _instance.createNewGame(account2, hashedChoice, deadline, {from: account1, value:100});
-		await timeTravel.advanceManyBlocks(deadline + 1);
-		await _instance.claimUnplayedGameBalance(gameAddress, {from: account1});
 		
-		let gameObject = await _instance.games.call(gameAddress, {from: account1});
-		assert.strictEqual(gameObject.isResolved, true, "Game should be resolved right now.");
-
-		let balance1 = await _instance.balances.call(account1);
-		assert.strictEqual(balance1.toString(10), "100", "Wrong balance found.");
-	});
-
-	it("6) should claim an unrevealed game", async () => {
-		let hashedChoice = await _instance.getHashedChoice.call(defaultP1Choice, account2, defaultPassword, {from: account1});
-		let gameAddress = await _instance.createNewGame.call(account2, hashedChoice, deadline, {from: account1});
 		await _instance.createNewGame(account2, hashedChoice, deadline, {from: account1, value:100});
-		await _instance.betInExistingGame(gameAddress, defaultP2Choice, {from: account2, value:100});
+		await _instance.betInExistingGame(hashedChoice, defaultP2Choice, {from: account2, value:100});
 		await timeTravel.advanceManyBlocks(gracePeriod + 1);
-		await _instance.claimUnrevealedGameBalance(gameAddress, {from: account2});
+		await _instance.claimUnrevealedGameBalance(hashedChoice, {from: account2});
 
-		let gameObject = await _instance.games.call(gameAddress, {from: account1});
-		assert.strictEqual(gameObject.isResolved, true, "Game should be resolved right now.");
+		let gameObject = await _instance.games.call(hashedChoice, {from: account1});
+		assert.strictEqual(gameObject.validUntilBlock.toString(10), "0", "Game should be resolved right now.");
 
 		let balance2 = await _instance.balances.call(account2);
 		assert.strictEqual(balance2.toString(10), "200", "Wrong balance found.");
 	});
 
-	it("7) should withdraw", async () => {
+	it("6) should withdraw", async () => {
 		let hashedChoice = await _instance.getHashedChoice.call(defaultP1Choice, account2, defaultPassword, {from: account1});
-		let gameAddress = await _instance.createNewGame.call(account2, hashedChoice, deadline, {from: account1});
+		
 		await _instance.createNewGame(account2, hashedChoice, deadline, {from: account1, value:100});
-		await _instance.betInExistingGame(gameAddress, defaultP2Choice, {from: account2, value:100});
+		await _instance.betInExistingGame(hashedChoice, defaultP2Choice, {from: account2, value:100});
 		await timeTravel.advanceManyBlocks(gracePeriod + 1);
-		await _instance.claimUnrevealedGameBalance(gameAddress, {from: account2});
+		await _instance.claimUnrevealedGameBalance(hashedChoice, {from: account2});
 		await balanceCheck.balanceDiff(_instance.withdraw({from:account2}), account2, 200, "Did not withdraw the correct amount.");
 	});
 
 	it("1.1) should fail to create game if the game ID already exists", async () => {
 		let hashedChoice = await _instance.getHashedChoice.call(defaultP1Choice, account2, defaultPassword, {from: account1});		
+		
 		await _instance.createNewGame(account2, hashedChoice, deadline, {from: account1, value:100});
 		await truffleAssert.reverts(_instance.createNewGame(account2, hashedChoice, deadline, {from: account1, value:100}), truffleAssert.ErrorType.REVERT, "Duplicated game ID");
 	});
 
 	it("1.2) should fail to create game if the password has already been used", async () => {
 		let hashedChoice = await _instance.getHashedChoice.call(defaultP1Choice, account2, defaultPassword, {from: account1});
+		
 		await _instance.createNewGame(account2, hashedChoice, deadline, {from: account1, value:100});
 		await truffleAssert.reverts(_instance.createNewGame(account3, hashedChoice, deadline, {from: account1, value:100}), truffleAssert.ErrorType.REVERT, "Duplicated password");
 	});
@@ -349,166 +328,139 @@ contract("JoKenPo", accounts => {
 
 	it("2.1) should fail to bet in non-existent game", async () => {
 		let hashedChoice = await _instance.getHashedChoice.call(defaultP1Choice, account2, defaultPassword, {from: account1});
-		let gameAddress = await _instance.createNewGame.call(account2, hashedChoice, deadline, {from: account1});	
-		await truffleAssert.reverts(_instance.betInExistingGame(gameAddress, defaultP2Choice, {from: account2, value:100}), truffleAssert.ErrorType.REVERT, "Bet in non-existent game");
+		await truffleAssert.reverts(_instance.betInExistingGame(hashedChoice, defaultP2Choice, {from: account2, value:100}), truffleAssert.ErrorType.REVERT, "Bet in non-existent game");
 	});
 
 	it("2.2) should fail to bet in existing game if msg.sender != player2", async () => {
 		let hashedChoice = await _instance.getHashedChoice.call(defaultP1Choice, account2, defaultPassword, {from: account1});
-		let gameAddress = await _instance.createNewGame.call(account2, hashedChoice, deadline, {from: account1});
+		
 		await _instance.createNewGame(account2, hashedChoice, deadline, {from: account1, value:100});
-		await truffleAssert.reverts(_instance.betInExistingGame(gameAddress, defaultP2Choice, {from: account1, value:100}), truffleAssert.ErrorType.REVERT, "msg.sender != player2");
+		await truffleAssert.reverts(_instance.betInExistingGame(hashedChoice, defaultP2Choice, {from: account1, value:100}), truffleAssert.ErrorType.REVERT, "msg.sender != player2");
 	});
 
 	it("2.3) should fail to bet in existing game if player2 has already bet", async () => {
 		let hashedChoice = await _instance.getHashedChoice.call(defaultP1Choice, account2, defaultPassword, {from: account1});
-		let gameAddress = await _instance.createNewGame.call(account2, hashedChoice, deadline, {from: account1});
+		
 		await _instance.createNewGame(account2, hashedChoice, deadline, {from: account1, value:100});
-		await _instance.betInExistingGame(gameAddress, defaultP2Choice, {from: account2, value:100})
-		await truffleAssert.reverts(_instance.betInExistingGame(gameAddress, defaultP2Choice, {from: account2, value:100}), truffleAssert.ErrorType.REVERT, "Double bet");
+		await _instance.betInExistingGame(hashedChoice, defaultP2Choice, {from: account2, value:100})
+		await truffleAssert.reverts(_instance.betInExistingGame(hashedChoice, defaultP2Choice, {from: account2, value:100}), truffleAssert.ErrorType.REVERT, "Double bet");
 	});
 
 	it("2.4) should fail to bet in existing game if it has already expired", async () => {
 		let hashedChoice = await _instance.getHashedChoice.call(defaultP1Choice, account2, defaultPassword, {from: account1});
-		let gameAddress = await _instance.createNewGame.call(account2, hashedChoice, deadline, {from: account1});
+		
 		await _instance.createNewGame(account2, hashedChoice, deadline, {from: account1, value:100});
 		await timeTravel.advanceManyBlocks(deadline + 1);
-		await truffleAssert.reverts(_instance.betInExistingGame(gameAddress, defaultP2Choice, {from: account2, value:100}), truffleAssert.ErrorType.REVERT, "Bet in expired game");
+		await truffleAssert.reverts(_instance.betInExistingGame(hashedChoice, defaultP2Choice, {from: account2, value:100}), truffleAssert.ErrorType.REVERT, "Bet in expired game");
 	});
 
 	it("2.5) should fail to bet in existing game if it has been cancelled", async () => {
 		let hashedChoice = await _instance.getHashedChoice.call(defaultP1Choice, account2, defaultPassword, {from: account1});
-		let gameAddress = await _instance.createNewGame.call(account2, hashedChoice, deadline, {from: account1});
+		
 		await _instance.createNewGame(account2, hashedChoice, deadline, {from: account1, value:100});
-		await _instance.cancelGame(gameAddress, {from: account1});
-		await truffleAssert.reverts(_instance.betInExistingGame(gameAddress, defaultP2Choice, {from: account2, value:100}), truffleAssert.ErrorType.REVERT, "Bet in cancelled game");
+		await _instance.cancelGame(hashedChoice, {from: account1});
+		await truffleAssert.reverts(_instance.betInExistingGame(hashedChoice, defaultP2Choice, {from: account2, value:100}), truffleAssert.ErrorType.REVERT, "Bet in cancelled game");
 	});
 
 	it("2.6) should fail to bet in existing game if msg.value != game.betValue", async () => {
 		let hashedChoice = await _instance.getHashedChoice.call(defaultP1Choice, account2, defaultPassword, {from: account1});
-		let gameAddress = await _instance.createNewGame.call(account2, hashedChoice, deadline, {from: account1});
+		
 		await _instance.createNewGame(account2, hashedChoice, deadline, {from: account1, value:100});
-		await truffleAssert.reverts(_instance.betInExistingGame(gameAddress, defaultP2Choice, {from: account2, value:101}), truffleAssert.ErrorType.REVERT, "Bet with wrong msg.value");
+		await truffleAssert.reverts(_instance.betInExistingGame(hashedChoice, defaultP2Choice, {from: account2, value:101}), truffleAssert.ErrorType.REVERT, "Bet with wrong msg.value");
 	});
 
 	it("2.7) should fail to bet in existing game if choice is invalid", async () => {
 		let hashedChoice = await _instance.getHashedChoice.call(defaultP1Choice, account2, defaultPassword, {from: account1});
-		let gameAddress = await _instance.createNewGame.call(account2, hashedChoice, deadline, {from: account1});
+		
 		await _instance.createNewGame(account2, hashedChoice, deadline, {from: account1, value:100});
-		await truffleAssert.reverts(_instance.betInExistingGame(gameAddress, 4, {from: account2, value:100}), truffleAssert.ErrorType.REVERT, "Bet with invalid choice");
+		await truffleAssert.reverts(_instance.betInExistingGame(hashedChoice, 4, {from: account2, value:100}), truffleAssert.ErrorType.REVERT, "Bet with invalid choice");
 	});
 
 	it("3.1) should fail to reveal choice if msg.sender != player1", async () => {
 		let hashedChoice = await _instance.getHashedChoice.call(defaultP1Choice, account2, defaultPassword, {from: account1});
-		let gameAddress = await _instance.createNewGame.call(account2, hashedChoice, deadline, {from: account1});
+		
 		await _instance.createNewGame(account2, hashedChoice, deadline, {from: account1, value:100});
-		await _instance.betInExistingGame(gameAddress, defaultP2Choice, {from: account2, value:100});
-		await truffleAssert.reverts(_instance.revealChoice(gameAddress, defaultP1Choice, defaultPassword, {from: account2}), truffleAssert.ErrorType.REVERT, "msg.sender != player1");
+		await _instance.betInExistingGame(hashedChoice, defaultP2Choice, {from: account2, value:100});
+		await truffleAssert.reverts(_instance.revealChoice(hashedChoice, defaultP1Choice, defaultPassword, {from: account2}), truffleAssert.ErrorType.REVERT, "msg.sender != player1");
 	});
 
 	it("3.2) should fail to reveal choice if player2 has not played yet", async () => {
 		let hashedChoice = await _instance.getHashedChoice.call(defaultP1Choice, account2, defaultPassword, {from: account1});
-		let gameAddress = await _instance.createNewGame.call(account2, hashedChoice, deadline, {from: account1});
+		
 		await _instance.createNewGame(account2, hashedChoice, deadline, {from: account1, value:100});
-		await truffleAssert.reverts(_instance.revealChoice(gameAddress, defaultP1Choice, defaultPassword, {from: account2}), truffleAssert.ErrorType.REVERT, "reveal incomplete game");
+		await truffleAssert.reverts(_instance.revealChoice(hashedChoice, defaultP1Choice, defaultPassword, {from: account2}), truffleAssert.ErrorType.REVERT, "reveal incomplete game");
 	});
 
 	it("3.3) should fail to reveal choice if game has already ended", async () => {
 		let hashedChoice = await _instance.getHashedChoice.call(defaultP1Choice, account2, defaultPassword, {from: account1});
-		let gameAddress = await _instance.createNewGame.call(account2, hashedChoice, deadline, {from: account1});
+		
 		await _instance.createNewGame(account2, hashedChoice, deadline, {from: account1, value:100});
-		await _instance.betInExistingGame(gameAddress, defaultP2Choice, {from: account2, value:100});
-		await _instance.revealChoice(gameAddress, defaultP1Choice, defaultPassword, {from: account1})
-		await truffleAssert.reverts(_instance.revealChoice(gameAddress, defaultP1Choice, defaultPassword, {from: account1}), truffleAssert.ErrorType.REVERT, "Double reveal");
+		await _instance.betInExistingGame(hashedChoice, defaultP2Choice, {from: account2, value:100});
+		await _instance.revealChoice(hashedChoice, defaultP1Choice, defaultPassword, {from: account1})
+		await truffleAssert.reverts(_instance.revealChoice(hashedChoice, defaultP1Choice, defaultPassword, {from: account1}), truffleAssert.ErrorType.REVERT, "Double reveal");
 	});
 
 	it("3.4) should fail to reveal choice if the provided choice does not match", async () => {
 		let hashedChoice = await _instance.getHashedChoice.call(defaultP1Choice, account2, defaultPassword, {from: account1});
-		let gameAddress = await _instance.createNewGame.call(account2, hashedChoice, deadline, {from: account1});
+		
 		await _instance.createNewGame(account2, hashedChoice, deadline, {from: account1, value:100});
-		await _instance.betInExistingGame(gameAddress, defaultP2Choice, {from: account2, value:100});
-		await truffleAssert.reverts(_instance.revealChoice(gameAddress, 3, defaultPassword, {from: account1}), truffleAssert.ErrorType.REVERT, "Reveal with wrong choice");
+		await _instance.betInExistingGame(hashedChoice, defaultP2Choice, {from: account2, value:100});
+		await truffleAssert.reverts(_instance.revealChoice(hashedChoice, 3, defaultPassword, {from: account1}), truffleAssert.ErrorType.REVERT, "Reveal with wrong choice");
 	});
 
 	it("4.1) should fail to cancel game if msg.sender != player1", async () => {
 		let hashedChoice = await _instance.getHashedChoice.call(defaultP1Choice, account2, defaultPassword, {from: account1});
-		let gameAddress = await _instance.createNewGame.call(account2, hashedChoice, deadline, {from: account1});
+		
 		await _instance.createNewGame(account2, hashedChoice, deadline, {from: account1, value:100});
-		await truffleAssert.reverts(_instance.cancelGame(gameAddress, {from: account2}), truffleAssert.ErrorType.REVERT, "msg.sender != player1");
+		await truffleAssert.reverts(_instance.cancelGame(hashedChoice, {from: account2}), truffleAssert.ErrorType.REVERT, "msg.sender != player1");
 	});
 
 	it("4.2) should fail to cancel game if player2 has already played", async () => {
 		let hashedChoice = await _instance.getHashedChoice.call(defaultP1Choice, account2, defaultPassword, {from: account1});
-		let gameAddress = await _instance.createNewGame.call(account2, hashedChoice, deadline, {from: account1});
+		
 		await _instance.createNewGame(account2, hashedChoice, deadline, {from: account1, value:100});
-		await _instance.betInExistingGame(gameAddress, defaultP2Choice, {from: account2, value:100});
-		await truffleAssert.reverts(_instance.cancelGame(gameAddress, {from: account1}), truffleAssert.ErrorType.REVERT, "msg.sender != player1");
+		await _instance.betInExistingGame(hashedChoice, defaultP2Choice, {from: account2, value:100});
+		await truffleAssert.reverts(_instance.cancelGame(hashedChoice, {from: account1}), truffleAssert.ErrorType.REVERT, "msg.sender != player1");
 	});
 
-	it("5.1) should fail to claim an unplayed game if msg.sender != player1", async () => {
+	it("4.3) should fail to cancel game if game has already ended", async () => {
 		let hashedChoice = await _instance.getHashedChoice.call(defaultP1Choice, account2, defaultPassword, {from: account1});
-		let gameAddress = await _instance.createNewGame.call(account2, hashedChoice, deadline, {from: account1});
+		
 		await _instance.createNewGame(account2, hashedChoice, deadline, {from: account1, value:100});
-		await timeTravel.advanceManyBlocks(deadline + 1);
-		await truffleAssert.reverts(_instance.claimUnplayedGameBalance(gameAddress, {from: account2}), truffleAssert.ErrorType.REVERT, "msg.sender != player1");
+		await _instance.betInExistingGame(hashedChoice, defaultP2Choice, {from: account2, value:100});
+		await _instance.revealChoice(hashedChoice, defaultP1Choice, defaultPassword, {from: account1})
+		await truffleAssert.reverts(_instance.cancelGame(hashedChoice, {from: account1}), truffleAssert.ErrorType.REVERT, "msg.sender != player1");
 	});
 
-	it("5.2) should fail to claim an unplayed game if player2 has already played", async () => {
+	it("5.1) should fail to claim an unrevealed game if msg.sender != player2", async () => {
 		let hashedChoice = await _instance.getHashedChoice.call(defaultP1Choice, account2, defaultPassword, {from: account1});
-		let gameAddress = await _instance.createNewGame.call(account2, hashedChoice, deadline, {from: account1});
+		
 		await _instance.createNewGame(account2, hashedChoice, deadline, {from: account1, value:100});
-		await _instance.betInExistingGame(gameAddress, defaultP2Choice, {from: account2, value:100});
-		await timeTravel.advanceManyBlocks(deadline + gracePeriod + 1);
-		await truffleAssert.reverts(_instance.claimUnplayedGameBalance(gameAddress, {from: account1}), truffleAssert.ErrorType.REVERT, "msg.sender != player1");
-	});
-
-	it("5.3) should fail to claim an unplayed game if game has already ended", async () => {
-		let hashedChoice = await _instance.getHashedChoice.call(defaultP1Choice, account2, defaultPassword, {from: account1});
-		let gameAddress = await _instance.createNewGame.call(account2, hashedChoice, deadline, {from: account1});
-		await _instance.createNewGame(account2, hashedChoice, deadline, {from: account1, value:100});
-		await _instance.betInExistingGame(gameAddress, defaultP2Choice, {from: account2, value:100});
-		await _instance.revealChoice(gameAddress, defaultP1Choice, defaultPassword, {from: account1})
-		await timeTravel.advanceManyBlocks(deadline + gracePeriod + 1);
-		await truffleAssert.reverts(_instance.claimUnplayedGameBalance(gameAddress, {from: account1}), truffleAssert.ErrorType.REVERT, "msg.sender != player1");
-	});
-
-	it("5.4) should fail to claim an unplayed game if game has not expired yet", async () => {
-		let hashedChoice = await _instance.getHashedChoice.call(defaultP1Choice, account2, defaultPassword, {from: account1});
-		let gameAddress = await _instance.createNewGame.call(account2, hashedChoice, deadline, {from: account1});
-		await _instance.createNewGame(account2, hashedChoice, deadline, {from: account1, value:100});
-		await timeTravel.advanceManyBlocks(deadline - 1);
-		await truffleAssert.reverts(_instance.claimUnplayedGameBalance(gameAddress, {from: account1}), truffleAssert.ErrorType.REVERT, "msg.sender != player1");
-	});
-
-	it("6.1) should fail to claim an unrevealed game if msg.sender != player2", async () => {
-		let hashedChoice = await _instance.getHashedChoice.call(defaultP1Choice, account2, defaultPassword, {from: account1});
-		let gameAddress = await _instance.createNewGame.call(account2, hashedChoice, deadline, {from: account1});
-		await _instance.createNewGame(account2, hashedChoice, deadline, {from: account1, value:100});
-		await _instance.betInExistingGame(gameAddress, defaultP2Choice, {from: account2, value:100});
+		await _instance.betInExistingGame(hashedChoice, defaultP2Choice, {from: account2, value:100});
 		await timeTravel.advanceManyBlocks(gracePeriod + 1);
-		await truffleAssert.reverts(_instance.claimUnrevealedGameBalance(gameAddress, {from: account3}), truffleAssert.ErrorType.REVERT, "msg.sender != player2");
+		await truffleAssert.reverts(_instance.claimUnrevealedGameBalance(hashedChoice, {from: account3}), truffleAssert.ErrorType.REVERT, "msg.sender != player2");
 	});
 
-	it("6.2) should fail to claim an unrevealed game if game has already ended", async () => {
+	it("5.2) should fail to claim an unrevealed game if game has already ended", async () => {
 		let hashedChoice = await _instance.getHashedChoice.call(defaultP1Choice, account2, defaultPassword, {from: account1});
-		let gameAddress = await _instance.createNewGame.call(account2, hashedChoice, deadline, {from: account1});
+		
 		await _instance.createNewGame(account2, hashedChoice, deadline, {from: account1, value:100});
-		await _instance.betInExistingGame(gameAddress, defaultP2Choice, {from: account2, value:100});
-		await _instance.revealChoice(gameAddress, defaultP1Choice, defaultPassword, {from: account1})
+		await _instance.betInExistingGame(hashedChoice, defaultP2Choice, {from: account2, value:100});
+		await _instance.revealChoice(hashedChoice, defaultP1Choice, defaultPassword, {from: account1})
 		await timeTravel.advanceManyBlocks(gracePeriod + 1);
-		await truffleAssert.reverts(_instance.claimUnrevealedGameBalance(gameAddress, {from: account2}), truffleAssert.ErrorType.REVERT, "game has already ended");
+		await truffleAssert.reverts(_instance.claimUnrevealedGameBalance(hashedChoice, {from: account2}), truffleAssert.ErrorType.REVERT, "game has already ended");
 	});
 
-	it("6.3) should fail to claim an unrevealed game if game has not expired yet", async () => {
+	it("5.3) should fail to claim an unrevealed game if game has not expired yet", async () => {
 		let hashedChoice = await _instance.getHashedChoice.call(defaultP1Choice, account2, defaultPassword, {from: account1});
-		let gameAddress = await _instance.createNewGame.call(account2, hashedChoice, deadline, {from: account1});
+		
 		await _instance.createNewGame(account2, hashedChoice, deadline, {from: account1, value:100});
-		await _instance.betInExistingGame(gameAddress, defaultP2Choice, {from: account2, value:100});
+		await _instance.betInExistingGame(hashedChoice, defaultP2Choice, {from: account2, value:100});
 		await timeTravel.advanceManyBlocks(gracePeriod - 1);
-		await truffleAssert.reverts(_instance.claimUnrevealedGameBalance(gameAddress, {from: account2}), truffleAssert.ErrorType.REVERT, "game has not expired yet");
+		await truffleAssert.reverts(_instance.claimUnrevealedGameBalance(hashedChoice, {from: account2}), truffleAssert.ErrorType.REVERT, "game has not expired yet");
 	});
 
-	it("7.1) should fail to withdraw if balance <= 0", async () => {
+	it("6.1) should fail to withdraw if balance <= 0", async () => {
 		await truffleAssert.reverts(_instance.withdraw({from:account2}), truffleAssert.ErrorType.REVERT, "withdraw with balance <= 0");
 	});
 });

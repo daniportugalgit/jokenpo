@@ -15,7 +15,7 @@ contract Pausable is Ownable {
 		_;
 	}
 
-	modifier onlyReady() {
+	modifier onlyRunning() {
 		require(!paused && !frozen, "The contract is paused or frozen. Please contact the administrator.");
 		_;
 	}
@@ -25,7 +25,7 @@ contract Pausable is Ownable {
 		_;
 	}
 
-	function pause() public onlyOwner onlyReady {
+	function pause() public onlyOwner onlyRunning {
 		paused = true;
 		emit ContractPaused(msg.sender);
 	}
