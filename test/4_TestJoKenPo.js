@@ -1,5 +1,5 @@
-const timeTravel = require("./timeTravel/timeTravel");
-const balanceCheck = require("./balanceCheck/balanceCheck");
+const timeTravel = require("./utils/timeTravel");
+const balanceCheck = require("./utils/balanceCheck");
 const truffleAssert = require('truffle-assertions');
 const BASE_CONTRACT = artifacts.require("JoKenPo");
 
@@ -31,6 +31,8 @@ HAPPY PATHS (second part):
 4) It should cancel a game
 5) It should claim an unrevealed game
 6) It should withdraw
+7) It should bet in existing game sending less than betAmount if p2 has enough balance
+8) It should give p2 the change when he sends more ETH than needed in a bet
 
 EXCEPTIONS:
 1.1) It should fail to create game if the game ID already exists
@@ -43,7 +45,7 @@ EXCEPTIONS:
 2.3) It should fail to bet in existing game if player2 has already bet
 2.4) It should fail to bet in existing game if it has already expired
 2.5) It should fail to bet in existing game if it has been cancelled
-2.6) It should fail to bet in existing game if msg.value != game.betValue
+2.6) It should fail to bet in existing game if msg.value + p2Balance < game.betValue
 2.7) It should fail to bet in existing game if choice is invalid
 
 3.1) It should fail to reveal choice if msg.sender != player1
@@ -269,6 +271,7 @@ contract("JoKenPo", accounts => {
 		let hashedChoice = await _instance.getHashedChoice.call(defaultP1Choice, account2, defaultPassword, {from: account1});
 		
 		await _instance.createNewGame(account2, hashedChoice, deadline, {from: account1, value:100});
+		await timeTravel.advanceManyBlocks(deadline + 1);
 		await _instance.cancelGame(hashedChoice, {from: account1});
 		let gameObject = await _instance.games.call(hashedChoice, {from: account1});
 		
@@ -301,6 +304,30 @@ contract("JoKenPo", accounts => {
 		await timeTravel.advanceManyBlocks(gracePeriod + 1);
 		await _instance.claimUnrevealedGameBalance(hashedChoice, {from: account2});
 		await balanceCheck.balanceDiff(_instance.withdraw({from:account2}), account2, 200, "Did not withdraw the correct amount.");
+	});
+
+	it("7) should bet in existing game with msg.value < betAmount if p2 has enough balance", async () => {
+		let hashedChoice = await _instance.getHashedChoice.call(defaultP1Choice, account2, defaultPassword, {from: account1});
+		await _instance.createNewGame(account2, hashedChoice, deadline, {from: account1, value:100});
+		await _instance.betInExistingGame(hashedChoice, defaultP2Choice, {from: account2, value:100});
+		await timeTravel.advanceManyBlocks(gracePeriod + 1);
+		await _instance.claimUnrevealedGameBalance(hashedChoice, {from: account2}); //p2 has 200 wei by now;
+		
+		let hashedChoice2 = await _instance.getHashedChoice.call(defaultP1Choice, account2, "somethingElse", {from: account1});
+		await _instance.createNewGame(account2, hashedChoice2, deadline, {from: account1, value:100});
+		await _instance.betInExistingGame(hashedChoice2, defaultP2Choice, {from: account2, value:50});
+
+		let balance2 = await _instance.balances.call(account2);
+		assert.strictEqual(balance2.toString(10), "150", "Wrong balance found.");
+	});
+
+	it("8) should give p2 the change when he sends more ETH than needed in a bet", async () => {
+		let hashedChoice = await _instance.getHashedChoice.call(defaultP1Choice, account2, defaultPassword, {from: account1});
+		await _instance.createNewGame(account2, hashedChoice, deadline, {from: account1, value:100});
+		await _instance.betInExistingGame(hashedChoice, defaultP2Choice, {from: account2, value:150});
+		
+		let balance2 = await _instance.balances.call(account2);
+		assert.strictEqual(balance2.toString(10), "50", "Wrong balance found.");
 	});
 
 	it("1.1) should fail to create game if the game ID already exists", async () => {
@@ -358,15 +385,16 @@ contract("JoKenPo", accounts => {
 		let hashedChoice = await _instance.getHashedChoice.call(defaultP1Choice, account2, defaultPassword, {from: account1});
 		
 		await _instance.createNewGame(account2, hashedChoice, deadline, {from: account1, value:100});
+		await timeTravel.advanceManyBlocks(deadline + 1);
 		await _instance.cancelGame(hashedChoice, {from: account1});
 		await truffleAssert.reverts(_instance.betInExistingGame(hashedChoice, defaultP2Choice, {from: account2, value:100}), truffleAssert.ErrorType.REVERT, "Bet in cancelled game");
 	});
 
-	it("2.6) should fail to bet in existing game if msg.value != game.betValue", async () => {
+	it("2.6) should fail to bet in existing game if msg.value + p2Balance < game.betValue", async () => {
 		let hashedChoice = await _instance.getHashedChoice.call(defaultP1Choice, account2, defaultPassword, {from: account1});
 		
 		await _instance.createNewGame(account2, hashedChoice, deadline, {from: account1, value:100});
-		await truffleAssert.reverts(_instance.betInExistingGame(hashedChoice, defaultP2Choice, {from: account2, value:101}), truffleAssert.ErrorType.REVERT, "Bet with wrong msg.value");
+		await truffleAssert.reverts(_instance.betInExistingGame(hashedChoice, defaultP2Choice, {from: account2, value:99}), truffleAssert.ErrorType.REVERT, "Bet with wrong msg.value");
 	});
 
 	it("2.7) should fail to bet in existing game if choice is invalid", async () => {

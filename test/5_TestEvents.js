@@ -1,4 +1,4 @@
-const timeTravel = require("./timeTravel/timeTravel");
+const timeTravel = require("./utils/timeTravel");
 const truffleAssert = require('truffle-assertions');
 const BASE_CONTRACT = artifacts.require("JoKenPo");
 
@@ -62,6 +62,7 @@ contract("should emit events when", accounts => {
     	let hashedChoice = await _instance.getHashedChoice.call(defaultP1Choice, account2, defaultPassword, {from: account1});
 		
 		await _instance.createNewGame(account2, hashedChoice, deadline, {from: account1, value:100});
+		await timeTravel.advanceManyBlocks(deadline + 1);
 		let result = await _instance.cancelGame(hashedChoice, {from: account1});
 
 		await truffleAssert.eventEmitted(result, 'LogGameCancelled', (ev) => {

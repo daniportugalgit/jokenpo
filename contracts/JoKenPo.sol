@@ -3,7 +3,7 @@ pragma solidity 0.5.0;
 import "./Pausable.sol";
 import "./SafeMath.sol";
 
-//v0.99 - Only one strech goal not yet implemented: to let players bet their previous winnings.
+//v1.00: I think it's done!
 
 contract JoKenPo is Pausable {
 	using SafeMath for uint;
@@ -13,7 +13,6 @@ contract JoKenPo is Pausable {
 
 	enum Choices { NOTHING, ROCK, PAPER, SCISSORS }
 	mapping (bytes32 => Game) public games;
-	mapping (bytes32 => bool) public pastHashedChoices; //guarantees there are no duplicates
 
 	struct Game {
 		address payable player1;
@@ -56,29 +55,44 @@ contract JoKenPo is Pausable {
 
 	//Player2 plays:
 	function betInExistingGame(bytes32 gameAddress, uint8 p2Choice) onlyValidChoice(p2Choice) onlyRunning public payable {
-		require(games[gameAddress].player1 != address(0), "Game not found. Please check the provided game address.");
+		address p1 = games[gameAddress].player1; //avoiding multiple SLOADs
+		uint betVal = games[gameAddress].betValue; //avoiding multiple SLOADs
+		uint p2Balance = balances[msg.sender]; //avoiding multiple SLOADs
+
+		require(p1 != address(0), "Game not found. Please check the provided game address.");
 		require(games[gameAddress].player2 == msg.sender, "Either you are not player2, or this game has been cancelled/resolved.");
 		require(games[gameAddress].p2Choice == 0, "A bet had already been placed for player2.");
 		require(games[gameAddress].validUntilBlock >= block.number, "This game has expired and you forfeited your right to win.");
-		require(msg.value == games[gameAddress].betValue, "Wrong bet value.");
+		require(msg.value + p2Balance >= betVal, "Insufficient funds. Please send more ETH.");
+
+		if(msg.value > betVal) {
+			//return some money to p2:
+			balances[msg.sender] = p2Balance.add(msg.value - betVal);
+		} else if(msg.value < betVal) {
+			//get some money from p2 to complete the bet:
+			balances[msg.sender] = p2Balance.sub(betVal - msg.value); //SafeMath will revert if p2 has not enough funds (but, above, we require enough money anyway)
+		} else {
+			//do nothing, because p2 sent the exact expected amount
+		}
 
 		games[gameAddress].player2 = msg.sender; 
 		games[gameAddress].p2Choice = p2Choice;
 		games[gameAddress].validUntilBlock = block.number + gracePeriod; //extends deadline for player1 to reveal
 
-		emit LogGameReadyForReveal(games[gameAddress].player1, msg.sender, gameAddress);
+		emit LogGameReadyForReveal(p1, msg.sender, gameAddress);
 	}
 
 	//Player1 reveals the choice she made and the game is resolved:
 	function revealChoice(bytes32 gameAddress, uint8 choice, string memory password) onlyRunning public {
-		address p2 = games[gameAddress].player2; //helper to avoid SLOAD
+		address p2 = games[gameAddress].player2; //avoiding multiple SLOADs
+		uint8 p2Choice = games[gameAddress].p2Choice; //avoiding multiple SLOADs
 
 		require(games[gameAddress].player1 == msg.sender, "Only player1 may call this function.");
-		require(games[gameAddress].p2Choice != 0, "Either player2 has not played yet, or this game has already been cancelled/resolved.");
+		require(p2Choice != 0, "Either player2 has not played yet, or this game has already been cancelled/resolved.");
 		require(getHashedChoice(choice, p2, password) == gameAddress, "Choice did not match.");
 
 		address winner;
-		uint8 winnerIndex = getWinner(choice, uint8(games[gameAddress].p2Choice));
+		uint8 winnerIndex = getWinner(choice, p2Choice);
 
 		if(winnerIndex == 0) {
 			//Draw:
@@ -87,15 +101,15 @@ contract JoKenPo is Pausable {
 			winner = address(0);
 		} else if (winnerIndex == 1) {
 			//P1 won:
-			balances[msg.sender] = balances[msg.sender].add(games[gameAddress].betValue.mul(2));
+			balances[msg.sender] = balances[msg.sender].add(games[gameAddress].betValue.mul(2)); //SafeMath will revert on overflow
 			winner = msg.sender;
 		} else {
 			//P2 won:
-			balances[p2] = balances[p2].add(games[gameAddress].betValue.mul(2));
+			balances[p2] = balances[p2].add(games[gameAddress].betValue.mul(2)); //SafeMath will revert on overflow
 			winner = p2;
 		}
 
-		emit LogGameResolved(gameAddress, winner, games[gameAddress].betValue.mul(2));
+		emit LogGameResolved(gameAddress, winner, games[gameAddress].betValue.mul(2)); //SafeMath will revert on overflow
 		freeGameStorage(gameAddress);
 	}
 
@@ -113,11 +127,13 @@ contract JoKenPo is Pausable {
 		return 2; //P2 Wins (if P1 tried to cheat by using an invalid hash, P2 wins)
 	}
 
-	//Player1 may cancel the game before player2 plays:
+	//Player1 may cancel the game (before player2 plays AND after the deadline has expired):
 	function cancelGame(bytes32 gameAddress) onlyRunning public {
+		uint deadline = games[gameAddress].validUntilBlock; //avoiding multiple SLOADs
 		require(games[gameAddress].player1 == msg.sender, "Only player1 may call this function."); //this also guarantees the game exists
 		require(games[gameAddress].p2Choice == 0, "Player2 has already played. This game cannot be cancelled anymore.");
-		require(games[gameAddress].validUntilBlock != 0, "This game has already been resolved.");
+		require(block.number > deadline, "You cannot cancel a game before the deadline has expired."); //this flow prevents a front-running vulnerability
+		require(deadline != 0, "This game has already been resolved.");
 
 		balances[msg.sender] = balances[msg.sender].add(games[gameAddress].betValue);
 		freeGameStorage(gameAddress);
