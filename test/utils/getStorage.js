@@ -69,7 +69,7 @@ also, sha3(1, aliceAddress) would be used to get the mapping in slot 1 (0-based)
 */
 
 /*
-This should work, but it doesn't
+This should work to fetch values from mappings, but it doesn't:
 index = '0000000000000000000000000000000000000000000000000000000000000005'
 key =   '00000000000000000000000xbccc714d56bc0da0fd33d96d2a87b680dd6d0df6'
 let newKey =  web3.sha3(key + index, {"encoding":"hex"})
@@ -78,6 +78,5 @@ console.log('DEC: ' + web3.toDecimal(web3.eth.getStorageAt(contractAddress, newK
 result:
 0x0000000000000000000000000000000000000000000000000000000000000058
 DEC: 88
-
 */
 

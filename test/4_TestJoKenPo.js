@@ -39,6 +39,7 @@ EXCEPTIONS:
 1.2) It should fail to create game if the password has already been used
 1.3) It should fail to create game if adversary == msg.sender
 1.4) It should fail to generate hash if choice is invalid
+1.5) It should fail to create game if adversary == address(0);
 
 2.1) It should fail to bet in non-existent game
 2.2) It should fail to bet in existing game if msg.sender != player2
@@ -47,19 +48,23 @@ EXCEPTIONS:
 2.5) It should fail to bet in existing game if it has been cancelled
 2.6) It should fail to bet in existing game if msg.value + p2Balance < game.betValue
 2.7) It should fail to bet in existing game if choice is invalid
+2.8) It should fail to bet in existing game if gameAddress == address(0)
 
 3.1) It should fail to reveal choice if msg.sender != player1
 3.2) It should fail to reveal choice if player2 has not played yet
 3.3) It should fail to reveal choice if game has already ended
 3.4) It should fail to reveal choice if the provided choice does not match
+3.5) It should fail to reveal choice if gameAddress == address(0)
 
 4.1) It should fail to cancel game if msg.sender != player1
 4.2) It should fail to cancel game if player2 has already played
 4.3) It should fail to cancel game if game has already ended
+4.4) It should fail to cancel game if gameAddress == address(0)
 
 5.1) It should fail to claim an unrevealed game if msg.sender != player2
 5.2) It should fail to claim an unrevealed game if game has already ended
 5.3) It should fail to claim an unrevealed game if game has not expired yet
+5.4) It should fail to claim an unrevealed game if gameAddress == address(0)
 
 6.1) It should fail to withdraw if balance <= 0
 */
@@ -353,6 +358,11 @@ contract("JoKenPo", accounts => {
 		await truffleAssert.reverts(_instance.getHashedChoice.call(4, account2, defaultPassword, {from: account1}), truffleAssert.ErrorType.REVERT, "Invalid choice");
 	});
 
+	it("1.5) should fail to create game if adversary == address(0)", async () => {
+		let hashedChoice = await _instance.getHashedChoice.call(defaultP1Choice, account2, defaultPassword, {from: account1});
+		await truffleAssert.reverts(_instance.createNewGame(addressZero, hashedChoice, deadline, {from: account1, value:100}), truffleAssert.ErrorType.REVERT, "adversary == address(0)");
+	});
+
 	it("2.1) should fail to bet in non-existent game", async () => {
 		let hashedChoice = await _instance.getHashedChoice.call(defaultP1Choice, account2, defaultPassword, {from: account1});
 		await truffleAssert.reverts(_instance.betInExistingGame(hashedChoice, defaultP2Choice, {from: account2, value:100}), truffleAssert.ErrorType.REVERT, "Bet in non-existent game");
@@ -404,6 +414,10 @@ contract("JoKenPo", accounts => {
 		await truffleAssert.reverts(_instance.betInExistingGame(hashedChoice, 4, {from: account2, value:100}), truffleAssert.ErrorType.REVERT, "Bet with invalid choice");
 	});
 
+	it("2.8) should fail to bet in existing game if gameAddress == address(0)", async () => {
+		await truffleAssert.reverts(_instance.betInExistingGame(addressZero, defaultP2Choice, {from: account2, value:100}), truffleAssert.ErrorType.REVERT, "gameAddress == address(0)");
+	});
+
 	it("3.1) should fail to reveal choice if msg.sender != player1", async () => {
 		let hashedChoice = await _instance.getHashedChoice.call(defaultP1Choice, account2, defaultPassword, {from: account1});
 		
@@ -436,6 +450,10 @@ contract("JoKenPo", accounts => {
 		await truffleAssert.reverts(_instance.revealChoice(hashedChoice, 3, defaultPassword, {from: account1}), truffleAssert.ErrorType.REVERT, "Reveal with wrong choice");
 	});
 
+	it("3.5) should fail to reveal choice if gameAddress == address(0)", async () => {
+		await truffleAssert.reverts(_instance.revealChoice(addressZero, defaultP2Choice, defaultPassword, {from: account1}), truffleAssert.ErrorType.REVERT, "gameAddress == address(0)");
+	});
+
 	it("4.1) should fail to cancel game if msg.sender != player1", async () => {
 		let hashedChoice = await _instance.getHashedChoice.call(defaultP1Choice, account2, defaultPassword, {from: account1});
 		
@@ -458,6 +476,10 @@ contract("JoKenPo", accounts => {
 		await _instance.betInExistingGame(hashedChoice, defaultP2Choice, {from: account2, value:100});
 		await _instance.revealChoice(hashedChoice, defaultP1Choice, defaultPassword, {from: account1})
 		await truffleAssert.reverts(_instance.cancelGame(hashedChoice, {from: account1}), truffleAssert.ErrorType.REVERT, "msg.sender != player1");
+	});
+
+	it("4.4) should fail to cancel game if gameAddress == address(0)", async () => {
+		await truffleAssert.reverts(_instance.cancelGame(addressZero, {from: account1}), truffleAssert.ErrorType.REVERT, "gameAddress == address(0)");
 	});
 
 	it("5.1) should fail to claim an unrevealed game if msg.sender != player2", async () => {
@@ -486,6 +508,10 @@ contract("JoKenPo", accounts => {
 		await _instance.betInExistingGame(hashedChoice, defaultP2Choice, {from: account2, value:100});
 		await timeTravel.advanceManyBlocks(gracePeriod - 1);
 		await truffleAssert.reverts(_instance.claimUnrevealedGameBalance(hashedChoice, {from: account2}), truffleAssert.ErrorType.REVERT, "game has not expired yet");
+	});
+	
+	it("5.4) should fail to claim an unrevealed game if gameAddress == address(0)", async () => {
+		await truffleAssert.reverts(_instance.claimUnrevealedGameBalance(addressZero, {from: account2}), truffleAssert.ErrorType.REVERT, "gameAddress == address(0)");
 	});
 
 	it("6.1) should fail to withdraw if balance <= 0", async () => {

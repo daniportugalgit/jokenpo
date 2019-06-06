@@ -3,7 +3,7 @@ pragma solidity 0.5.0;
 import "./Pausable.sol";
 import "./SafeMath.sol";
 
-//v1.00: I think it's done!
+//v1.01
 
 contract JoKenPo is Pausable {
 	using SafeMath for uint;
@@ -38,6 +38,7 @@ contract JoKenPo is Pausable {
 	//Player1 creates a new game:
 	//@return game address
 	function createNewGame(address payable adversary, bytes32 hashedP1Choice, uint deadlineInBlocks) onlyRunning public payable {
+		require(adversary != address(0), "Invalid adversary address.");
 		require(games[hashedP1Choice].player1 == address(0), "Game already exists. Please change your choice password.");
 		require(msg.sender != adversary, "You cannot play against yourself.");
 
@@ -55,40 +56,43 @@ contract JoKenPo is Pausable {
 
 	//Player2 plays:
 	function betInExistingGame(bytes32 gameAddress, uint8 p2Choice) onlyValidChoice(p2Choice) onlyRunning public payable {
+		//require(gameAddress != address(0)); //Never passes anyway, because it will halt at the requires below.
 		address p1 = games[gameAddress].player1; //avoiding multiple SLOADs
-		uint betVal = games[gameAddress].betValue; //avoiding multiple SLOADs
-		uint p2Balance = balances[msg.sender]; //avoiding multiple SLOADs
-
 		require(p1 != address(0), "Game not found. Please check the provided game address.");
 		require(games[gameAddress].player2 == msg.sender, "Either you are not player2, or this game has been cancelled/resolved.");
 		require(games[gameAddress].p2Choice == 0, "A bet had already been placed for player2.");
 		require(games[gameAddress].validUntilBlock >= block.number, "This game has expired and you forfeited your right to win.");
-		require(msg.value + p2Balance >= betVal, "Insufficient funds. Please send more ETH.");
+
+		uint betVal = games[gameAddress].betValue; //avoiding multiple SLOADs
+		uint p2Balance = balances[msg.sender]; //avoiding multiple SLOADs
+		require(msg.value.add(p2Balance) >= betVal, "Insufficient funds. Please send more ETH.");
 
 		if(msg.value > betVal) {
 			//return some money to p2:
-			balances[msg.sender] = p2Balance.add(msg.value - betVal);
+			balances[msg.sender] = p2Balance.add(msg.value.sub(betVal));
 		} else if(msg.value < betVal) {
 			//get some money from p2 to complete the bet:
-			balances[msg.sender] = p2Balance.sub(betVal - msg.value); //SafeMath will revert if p2 has not enough funds (but, above, we require enough money anyway)
+			balances[msg.sender] = p2Balance.sub(betVal.sub(msg.value)); //SafeMath will revert if p2 has not enough funds (but, above, we require enough money anyway)
 		} else {
-			//do nothing, because p2 sent the exact expected amount
-		}
-
-		games[gameAddress].player2 = msg.sender; 
+			//do nothing, because p2 sent the exact expected amount (msg.value == betVal)
+		}	
+		//balances[msg.sender] = p2Balance.add(msg.value).sub(betVal); //this would be much more elegant than if/else, but it's 5k gas more expensive when (msg.value == betVal)
+ 
 		games[gameAddress].p2Choice = p2Choice;
-		games[gameAddress].validUntilBlock = block.number + gracePeriod; //extends deadline for player1 to reveal
+		games[gameAddress].validUntilBlock = block.number.add(gracePeriod); //extends deadline for player1 to reveal
 
 		emit LogGameReadyForReveal(p1, msg.sender, gameAddress);
 	}
 
 	//Player1 reveals the choice she made and the game is resolved:
 	function revealChoice(bytes32 gameAddress, uint8 choice, string memory password) onlyRunning public {
-		address p2 = games[gameAddress].player2; //avoiding multiple SLOADs
-		uint8 p2Choice = games[gameAddress].p2Choice; //avoiding multiple SLOADs
-
+		//require(gameAddress != address(0)); //Never passes anyway, because it will halt at the requires below.
 		require(games[gameAddress].player1 == msg.sender, "Only player1 may call this function.");
+
+		uint8 p2Choice = games[gameAddress].p2Choice; //avoiding multiple SLOADs
 		require(p2Choice != 0, "Either player2 has not played yet, or this game has already been cancelled/resolved.");
+
+		address p2 = games[gameAddress].player2; //avoiding multiple SLOADs
 		require(getHashedChoice(choice, p2, password) == gameAddress, "Choice did not match.");
 
 		address winner;
@@ -114,7 +118,7 @@ contract JoKenPo is Pausable {
 	}
 
 	function freeGameStorage(bytes32 gameAddress) private {
-		//games[gameAddress].player1 = 0; //We actually shan't clear this one
+		//games[gameAddress].player1 = 0; //We actually should not clear this one :)
 		games[gameAddress].player2 = address(0);
 		games[gameAddress].betValue = 0;
 		games[gameAddress].p2Choice = 0;
@@ -129,9 +133,11 @@ contract JoKenPo is Pausable {
 
 	//Player1 may cancel the game (before player2 plays AND after the deadline has expired):
 	function cancelGame(bytes32 gameAddress) onlyRunning public {
-		uint deadline = games[gameAddress].validUntilBlock; //avoiding multiple SLOADs
+		//require(gameAddress != address(0)); //Never passes anyway, because it will halt at the requires below.
 		require(games[gameAddress].player1 == msg.sender, "Only player1 may call this function."); //this also guarantees the game exists
 		require(games[gameAddress].p2Choice == 0, "Player2 has already played. This game cannot be cancelled anymore.");
+		
+		uint deadline = games[gameAddress].validUntilBlock; //avoiding multiple SLOADs
 		require(block.number > deadline, "You cannot cancel a game before the deadline has expired."); //this flow prevents a front-running vulnerability
 		require(deadline != 0, "This game has already been resolved.");
 
@@ -143,8 +149,10 @@ contract JoKenPo is Pausable {
 
 	//Player2 may claim the prize in case player1 does not reveal his choice until the extended deadline (grace period):
 	function claimUnrevealedGameBalance(bytes32 gameAddress) onlyRunning public {
-		uint deadline = games[gameAddress].validUntilBlock;
+		//require(gameAddress != address(0)); //Never passes anyway, because it will halt at the requires below.
 		require(games[gameAddress].player2 == msg.sender, "Only player2 may call this function."); //this also guarantees the game exists
+
+		uint deadline = games[gameAddress].validUntilBlock;
 		require(deadline != 0, "This game has already ended.");
 		require(deadline < block.number, "This game has not expired yet.");
 
