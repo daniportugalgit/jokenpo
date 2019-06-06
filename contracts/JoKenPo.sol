@@ -18,11 +18,11 @@ contract JoKenPo is Pausable {
 		address payable player1;
 		address payable player2;
 		uint betValue;
-		uint8 p2Choice;
+		uint p2Choice;
 		uint validUntilBlock;
 	}
 
-	modifier onlyValidChoice(uint8 choice) {
+	modifier onlyValidChoice(uint choice) {
 		require(choice > 0 && choice < 4);
 		_;
 	}
@@ -48,14 +48,14 @@ contract JoKenPo is Pausable {
 	}
 
 	//Player1 uses this function to get the hash of her choice before creating a game:
-	function getHashedChoice(uint8 choice, address adversary, string memory password) onlyValidChoice(choice) public view returns (bytes32) {
+	function getHashedChoice(uint choice, address adversary, string memory password) onlyValidChoice(choice) public view returns (bytes32) {
 		require(adversary != address(0));
 
 		return keccak256(abi.encodePacked(address(this), msg.sender, adversary, choice, password));
 	}
 
 	//Player2 plays:
-	function betInExistingGame(bytes32 gameAddress, uint8 p2Choice) onlyValidChoice(p2Choice) onlyRunning public payable {
+	function betInExistingGame(bytes32 gameAddress, uint p2Choice) onlyValidChoice(p2Choice) onlyRunning public payable {
 		//require(gameAddress != address(0)); //Never passes anyway, because it will halt at the requires below.
 		address p1 = games[gameAddress].player1; //avoiding multiple SLOADs
 		require(p1 != address(0), "Game not found. Please check the provided game address.");
@@ -85,18 +85,18 @@ contract JoKenPo is Pausable {
 	}
 
 	//Player1 reveals the choice she made and the game is resolved:
-	function revealChoice(bytes32 gameAddress, uint8 choice, string memory password) onlyRunning public {
+	function revealChoice(bytes32 gameAddress, uint choice, string memory password) onlyRunning public {
 		//require(gameAddress != address(0)); //Never passes anyway, because it will halt at the requires below.
 		require(games[gameAddress].player1 == msg.sender, "Only player1 may call this function.");
 
-		uint8 p2Choice = games[gameAddress].p2Choice; //avoiding multiple SLOADs
+		uint p2Choice = games[gameAddress].p2Choice; //avoiding multiple SLOADs
 		require(p2Choice != 0, "Either player2 has not played yet, or this game has already been cancelled/resolved.");
 
 		address p2 = games[gameAddress].player2; //avoiding multiple SLOADs
 		require(getHashedChoice(choice, p2, password) == gameAddress, "Choice did not match.");
 
 		address winner;
-		uint8 winnerIndex = getWinner(choice, p2Choice);
+		uint winnerIndex = getWinner(choice, p2Choice);
 
 		if(winnerIndex == 0) {
 			//Draw:
@@ -125,7 +125,7 @@ contract JoKenPo is Pausable {
 		games[gameAddress].validUntilBlock = 0;
 	}
 
-	function getWinner(uint8 p1Choice, uint8 p2Choice) private pure returns(uint8) {
+	function getWinner(uint p1Choice, uint p2Choice) private pure returns(uint) {
 		if(p1Choice == p2Choice) { return 0; } //DRAW
 		if((p1Choice > p2Choice && !(p1Choice == 3 && p2Choice == 1)) || (p1Choice == 1 && p2Choice == 3)) { return 1; } //P1 Wins
 		return 2; //P2 Wins (if P1 tried to cheat by using an invalid hash, P2 wins)

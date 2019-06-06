@@ -8,6 +8,8 @@ async function at(contractAddress, slotIndex, block) {
 		return await web3.eth.getStorageAt(contractAddress, slotIndex);
 };
 
+//web3.utils.sha3Solidity(paddedTo32(sender), paddedTo32(0))
+
 //This should work, but it doesn't:
 async function atMapping(address, mappingSlot, key) {
   const mappingKeySlot = getMappingSlot(mappingSlot.toString(), key);
@@ -18,7 +20,7 @@ async function atMapping(address, mappingSlot, key) {
 const getMappingSlot = (mappingSlot, key) => {
   const mappingSlotPadded = standardizeInput(mappingSlot);
   const keyPadded = standardizeInput(key);
-  const slot = web3.utils.soliditySha3(keyPadded.concat(mappingSlotPadded), {encoding: 'hex'});
+  const slot = web3.utils.soliditySha3({t:'bytes', v: keyPadded.concat(mappingSlotPadded)});
 
   return slot;
 }
@@ -26,7 +28,6 @@ const getMappingSlot = (mappingSlot, key) => {
 const standardizeInput = input =>
   leftPad(web3.utils.toHex(input).replace('0x', ''), 64, '0');
 
-//This should work, but it doesn't:
 const findMappingStorage = async (address, key, startSlot, endSlot) => {
   const bigStart = startSlot.add ? startSlot : web3.utils.toBN(startSlot);
   const bigEnd = endSlot.add ? endSlot : new web3.utils.toBN(endSlot);
@@ -69,7 +70,6 @@ also, sha3(1, aliceAddress) would be used to get the mapping in slot 1 (0-based)
 */
 
 /*
-This should work to fetch values from mappings, but it doesn't:
 index = '0000000000000000000000000000000000000000000000000000000000000005'
 key =   '00000000000000000000000xbccc714d56bc0da0fd33d96d2a87b680dd6d0df6'
 let newKey =  web3.sha3(key + index, {"encoding":"hex"})
